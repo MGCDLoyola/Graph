@@ -102,7 +102,7 @@ class SharePoint:
         include_read_only: bool = True,
     ) -> dict[str, str]:
         mapping: dict[str, str] = {}
-        for column in self.get_list_columns(list_name):
+        for column in self.obtener_columnas(list_name):
             if not include_hidden and column.get("hidden"):
                 continue
             if not include_read_only and column.get("readOnly"):
