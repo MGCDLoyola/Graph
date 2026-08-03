@@ -76,17 +76,17 @@ class GraphClient:
     ) -> Iterator[dict[str, Any]]:
         url: str | None = self._build_url(endpoint)
         count = 0
-        headers = {**self._auth.headers, **(extra_headers or {})}
+        headers = {**self._auth.encabezados, **(extra_headers or {})}
 
         while url:
             logger.debug("Paginando: %s", url)
-            response = self._auth.session.request(
+            response = self._auth.sesion.request(
                 method="GET",
                 url=url,
                 headers=headers,
                 params=params if url == self._build_url(endpoint) else None,
                 timeout=DEFAULT_TIMEOUT,
-                verify=self._auth.session.verify,
+                verify=self._auth.sesion.verify,
             )
 
             try:
@@ -119,13 +119,13 @@ class GraphClient:
 
         while url:
             logger.debug("Paginando delta: %s", url)
-            response = self._auth.session.request(
+            response = self._auth.sesion.request(
                 method="GET",
                 url=url,
-                headers=self._auth.headers,
+                headers=self._auth.encabezados,
                 params=params if first else None,
                 timeout=DEFAULT_TIMEOUT,
-                verify=self._auth.session.verify,
+                verify=self._auth.sesion.verify,
             )
             first = False
 
@@ -161,14 +161,14 @@ class GraphClient:
         url = self._build_url(endpoint)
         logger.debug("%s %s", method, url)
 
-        headers = {**self._auth.headers, **(extra_headers or {})}
+        headers = {**self._auth.encabezados, **(extra_headers or {})}
 
-        response = self._auth.session.request(
+        response = self._auth.sesion.request(
             method=method,
             url=url,
             headers=headers,
             timeout=DEFAULT_TIMEOUT,
-            verify=self._auth.session.verify,
+            verify=self._auth.sesion.verify,
             **kwargs,
         )
 
