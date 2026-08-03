@@ -45,7 +45,7 @@ from mgc_graph import Mail
 
 mail = Mail(client, sender="notificaciones@mgcmexico.com")
 
-mail.send(
+mail.enviar(
     to="destinatario@ejemplo.com",
     subject="Reporte mensual",
     body="<p>Adjunto el reporte.</p>",
@@ -69,16 +69,16 @@ from mgc_graph import SharePoint
 sp = SharePoint(client, site_url="https://mgcmexico.sharepoint.com/sites/Cobranza")
 
 # Leer
-items = sp.get_list_items("Expedientes")
+items = sp.obtener_elementos("Expedientes")
 
 # Crear
-sp.create_item("Expedientes", {"Title": "Cliente Nuevo", "Estatus": "Pendiente"})
+sp.crear_elemento("Expedientes", {"Title": "Cliente Nuevo", "Estatus": "Pendiente"})
 
 # Actualizar
-sp.update_item("Expedientes", item_id="123", fields={"Estatus": "Cerrado"})
+sp.actualizar_elemento("Expedientes", item_id="123", fields={"Estatus": "Cerrado"})
 
 # Eliminar
-sp.delete_item("Expedientes", item_id="123")
+sp.eliminar_elemento("Expedientes", item_id="123")
 ```
 
 - `site_url` es la URL completa del sitio; la librería resuelve internamente el `site_id` y lo cachea (igual que el `list_id` de cada lista que uses), así que no hay que buscarlos a mano.

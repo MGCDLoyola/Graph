@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import urllib3
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -18,6 +19,8 @@ class GraphAuth:
         tenant_id: str,
         client_id: str,
         client_secret: str,
+        *,
+        verify_ssl: bool = True,
     ) -> None:
         self._tenant_id = tenant_id
         self._client_id = client_id
@@ -28,26 +31,30 @@ class GraphAuth:
         self._lock = threading.Lock()
 
         self._session = requests.Session()
+        self._session.verify = verify_ssl
+
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     @property
-    def session(self) -> requests.Session:
+    def sesion(self) -> requests.Session:
         return self._session
 
     @property
     def token(self) -> str:
         with self._lock:
             if self._token is None or datetime.now(timezone.utc) >= self._expires_at:
-                self._authenticate()
+                self._autenticar()
             return self._token
 
     @property
-    def headers(self) -> dict[str, str]:
+    def encabezados(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
 
-    def _authenticate(self) -> None:
+    def _autenticar(self) -> None:
         logger.debug("Refrescando token de Microsoft Graph...")
         try:
             response = self._session.post(
@@ -62,9 +69,25 @@ class GraphAuth:
                 timeout=30,
             )
             response.raise_for_status()
+
+        except requests.HTTPError as exc:
+            error_detail = ""
+            try:
+                error_body = exc.response.json()
+                error_code = error_body.get("error", "unknown")
+                error_desc = error_body.get("error_description", "Sin descripción")
+                error_detail = f"\nCódigo: {error_code}\nDescripción: {error_desc}"
+            except Exception:
+                error_detail = f"\nRespuesta: {exc.response.text}"
+
+            raise AuthenticationError(
+                f"Error al autenticarse con Microsoft Graph (HTTP {exc.response.status_code})."
+                f"{error_detail}"
+            ) from exc
+
         except requests.RequestException as exc:
             raise AuthenticationError(
-                f"Error al autenticarse con Microsoft Graph: {exc}"
+                f"Error de red al autenticarse con Microsoft Graph: {exc}"
             ) from exc
 
         data = response.json()

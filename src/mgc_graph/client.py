@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class GraphClient:
     def __init__(self, auth: GraphAuth) -> None:
         self._auth = auth
+
         retry_strategy = Retry(
             total=3,
             backoff_factor=1,
@@ -29,15 +30,16 @@ class GraphClient:
         self._auth.session.mount("https://", adapter)
         self._auth.session.mount("http://", adapter)
 
-    def get(
+    def obtener(
         self,
         endpoint: str,
         *,
         params: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        return self._request("GET", endpoint, params=params)
+        return self._request("GET", endpoint, params=params, extra_headers=extra_headers)
 
-    def post(
+    def crear(
         self,
         endpoint: str,
         *,
@@ -45,7 +47,7 @@ class GraphClient:
     ) -> dict[str, Any]:
         return self._request("POST", endpoint, json=json)
 
-    def patch(
+    def actualizar(
         self,
         endpoint: str,
         *,
@@ -53,7 +55,7 @@ class GraphClient:
     ) -> dict[str, Any]:
         return self._request("PATCH", endpoint, json=json)
 
-    def put(
+    def reemplazar(
         self,
         endpoint: str,
         *,
@@ -61,25 +63,30 @@ class GraphClient:
     ) -> dict[str, Any]:
         return self._request("PUT", endpoint, json=json)
 
-    def delete(self, endpoint: str) -> None:
+    def eliminar(self, endpoint: str) -> None:
         self._request("DELETE", endpoint)
 
-    def get_paginated(
+    def obtener_paginado(
         self,
         endpoint: str,
         *,
         params: dict[str, Any] | None = None,
+        max_items: int | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> Iterator[dict[str, Any]]:
         url: str | None = self._build_url(endpoint)
+        count = 0
+        headers = {**self._auth.headers, **(extra_headers or {})}
 
         while url:
             logger.debug("Paginando: %s", url)
             response = self._auth.session.request(
                 method="GET",
                 url=url,
-                headers=self._auth.headers,
+                headers=headers,
                 params=params if url == self._build_url(endpoint) else None,
                 timeout=DEFAULT_TIMEOUT,
+                verify=self._auth.session.verify,
             )
 
             try:
@@ -90,25 +97,78 @@ class GraphClient:
                 ) from exc
 
             data: dict[str, Any] = response.json()
-            yield from data.get("value", [])
+
+            for item in data.get("value", []):
+                yield item
+                count += 1
+                if max_items is not None and count >= max_items:
+                    return
 
             url = data.get("@odata.nextLink")
-            # Params solo en la primera petición; nextLink ya los incluye
+
+    def obtener_delta(
+        self,
+        endpoint: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[list[dict[str, Any]], str]:
+        url: str | None = self._build_url(endpoint)
+        items: list[dict[str, Any]] = []
+        delta_link: str | None = None
+        first = True
+
+        while url:
+            logger.debug("Paginando delta: %s", url)
+            response = self._auth.session.request(
+                method="GET",
+                url=url,
+                headers=self._auth.headers,
+                params=params if first else None,
+                timeout=DEFAULT_TIMEOUT,
+                verify=self._auth.session.verify,
+            )
+            first = False
+
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                raise RequestError(
+                    f"GET {url}\n{response.status_code}: {response.text}"
+                ) from exc
+
+            data: dict[str, Any] = response.json()
+            items.extend(data.get("value", []))
+
+            delta_link = data.get("@odata.deltaLink", delta_link)
+            url = data.get("@odata.nextLink")
+
+        if delta_link is None:
+            raise RequestError(
+                "La respuesta de delta no incluyó '@odata.deltaLink'; "
+                "no se pudo capturar el token para la siguiente sincronización."
+            )
+
+        return items, delta_link
 
     def _request(
         self,
         method: str,
         endpoint: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         url = self._build_url(endpoint)
         logger.debug("%s %s", method, url)
 
+        headers = {**self._auth.headers, **(extra_headers or {})}
+
         response = self._auth.session.request(
             method=method,
             url=url,
-            headers=self._auth.headers,
+            headers=headers,
             timeout=DEFAULT_TIMEOUT,
+            verify=self._auth.session.verify,
             **kwargs,
         )
 

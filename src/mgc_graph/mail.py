@@ -24,7 +24,7 @@ class Mail:
         self._client = client
         self._sender = sender
 
-    def send(
+    def enviar(
         self,
         to: str | list[str],
         subject: str,
@@ -43,23 +43,23 @@ class Mail:
                 "contentType": "HTML" if is_html else "Text",
                 "content": body,
             },
-            "toRecipients": self._as_recipients(to),
+            "toRecipients": self._a_destinatarios(to),
         }
 
         if cc:
-            message["ccRecipients"] = self._as_recipients(cc)
+            message["ccRecipients"] = self._a_destinatarios(cc)
         if bcc:
-            message["bccRecipients"] = self._as_recipients(bcc)
+            message["bccRecipients"] = self._a_destinatarios(bcc)
         if reply_to:
-            message["replyTo"] = self._as_recipients(reply_to)
+            message["replyTo"] = self._a_destinatarios(reply_to)
 
         if attachments:
             message["attachments"] = [
-                self._build_attachment(item) for item in attachments
+                self._construir_adjunto(item) for item in attachments
             ]
 
         try:
-            self._client.post(
+            self._client.crear(
                 f"/users/{self._sender}/sendMail",
                 json={
                     "message": message,
@@ -73,7 +73,7 @@ class Mail:
             ) from exc
 
     @staticmethod
-    def _as_recipients(value: str | list[str]) -> list[dict[str, Any]]:
+    def _a_destinatarios(value: str | list[str]) -> list[dict[str, Any]]:
         if isinstance(value, str):
             value = [value]
         return [
@@ -82,7 +82,7 @@ class Mail:
         ]
 
     @staticmethod
-    def _build_attachment(item: Any) -> dict[str, Any]:
+    def _construir_adjunto(item: Any) -> dict[str, Any]:
         if isinstance(item, tuple):
             name, content = item
             if not isinstance(content, (bytes, bytearray)):
