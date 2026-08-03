@@ -27,8 +27,8 @@ class GraphClient:
             respect_retry_after_header=True,
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
-        self._auth.session.mount("https://", adapter)
-        self._auth.session.mount("http://", adapter)
+        self._auth.sesion.mount("https://", adapter)
+        self._auth.sesion.mount("http://", adapter)
 
     def obtener(
         self,
