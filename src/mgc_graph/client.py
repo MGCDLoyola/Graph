@@ -39,6 +39,38 @@ class GraphClient:
     ) -> dict[str, Any]:
         return self._request("GET", endpoint, params=params, extra_headers=extra_headers)
 
+    def descargar(
+        self,
+        endpoint: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> bytes:
+        url = self._build_url(endpoint)
+
+        logger.debug("DESCARGA %s", url)
+
+        headers = {
+            **self._auth.encabezados,
+            **(extra_headers or {})
+        }
+
+        response = self._auth.sesion.request(
+            method="GET",
+            url=url,
+            headers=headers,
+            timeout=DEFAULT_TIMEOUT,
+            verify=self._auth.sesion.verify,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise RequestError(
+                f"GET {endpoint}\n{response.status_code}: {response.text}"
+            ) from exc
+
+        return response.content
+
     def crear(
         self,
         endpoint: str,
