@@ -9,12 +9,14 @@ from .exceptions import (
 )
 from .mail import Mail
 from .sharepoint import SharePoint
+from .mailbox import Mailbox
 
 __all__ = [
     "AuthenticationError",
     "GraphAuth",
     "GraphClient",
     "GraphError",
+    "Mailbox"
     "Mail",
     "MailError",
     "RequestError",
