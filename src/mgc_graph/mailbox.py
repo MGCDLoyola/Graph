@@ -17,7 +17,6 @@ class Mailbox:
         self._client = client
         self._mailbox = mailbox
 
-
     def buscar_enviados(
         self,
         asunto: str,
@@ -28,16 +27,14 @@ class Mailbox:
             f"/users/{self._mailbox}/mailFolders/SentItems/messages",
             params={
                 "$filter": (
-                    f"contains(subject,'{asunto}') "
-                    f"and sentDateTime ge {fecha.isoformat()}T00:00:00Z "
-                    f"and sentDateTime lt {fecha.isoformat()}T23:59:59Z"
+                    f"sentDateTime ge {fecha.isoformat()}T00:00:00Z "
+                    f"and sentDateTime lt {fecha.isoformat()}T23:59:59Z "
+                    f"and contains(subject,'{asunto}')"
                 ),
-                "$orderby": "sentDateTime desc",
             },
         )
 
         return respuesta.get("value", [])
-
 
     def descargar_correo(
         self,
@@ -48,5 +45,7 @@ class Mailbox:
         contenido = self._client.descargar(
             f"/users/{self._mailbox}/messages/{message_id}/$value"
         )
+
+        destino.parent.mkdir(parents=True, exist_ok=True)
 
         destino.write_bytes(contenido)
