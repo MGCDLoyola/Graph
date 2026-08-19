@@ -3,6 +3,7 @@ from .client import GraphClient
 from .exceptions import (
     AuthenticationError,
     GraphError,
+    MailboxError,
     MailError,
     RequestError,
     SharePointError,
@@ -16,7 +17,8 @@ __all__ = [
     "GraphAuth",
     "GraphClient",
     "GraphError",
-    "Mailbox"
+    "Mailbox",
+    "MailboxError",
     "Mail",
     "MailError",
     "RequestError",

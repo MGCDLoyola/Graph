@@ -24,7 +24,7 @@ class Mail:
         self._client = client
         self._sender = sender
 
-    def enviar(
+    def crear(
         self,
         to: str | list[str],
         subject: str,
@@ -35,8 +35,95 @@ class Mail:
         reply_to: str | list[str] | None = None,
         attachments: list[Any] | None = None,
         is_html: bool = True,
+    ) -> str:
+
+        message = self._armar_mensaje(
+            to, subject, body,
+            cc=cc, bcc=bcc, reply_to=reply_to, attachments=attachments, is_html=is_html
+        )
+
+        try:
+            respuesta = self._client.crear(
+                f"/users/{self._sender}/messages",
+                json=message,
+            )
+        except RequestError as exc:
+            raise MailError(
+                f"Error al crear borrador desde {self._sender}: {exc}"
+            ) from exc
+
+        return respuesta["id"]
+
+    def enviar(
+        self,
+        to: str | list[str] | None = None,
+        subject: str | None = None,
+        body: str | None = None,
+        *,
+        message_id: str | None = None,
+        cc: str | list[str] | None = None,
+        bcc: str | list[str] | None = None,
+        reply_to: str | list[str] | None = None,
+        attachments: list[Any] | None = None,
+        is_html: bool = True,
         save_to_sent_items: bool = True,
     ) -> None:
+
+        if message_id is not None:
+            if to is not None or subject is not None or body is not None:
+                raise MailError(
+                    "enviar() recibe o 'message_id', o 'to'/'subject'/'body' — no ambos."
+                )
+
+            try:
+                self._client.crear(
+                    f"/users/{self._sender}/messages/{message_id}/send"
+                )
+                logger.info("Correo despachado desde %s (id=%s)", self._sender, message_id)
+            except RequestError as exc:
+                raise MailError(
+                    f"Error al enviar el borrador {message_id} desde {self._sender}: {exc}"
+                ) from exc
+
+            return
+
+        if to is None or subject is None or body is None:
+            raise MailError(
+                "enviar() requiere 'to', 'subject' y 'body' cuando no se pasa 'message_id'."
+            )
+
+        message = self._armar_mensaje(
+            to, subject, body,
+            cc=cc, bcc=bcc, reply_to=reply_to, attachments=attachments, is_html=is_html
+        )
+
+        try:
+            self._client.crear(
+                f"/users/{self._sender}/sendMail",
+                json={
+                    "message": message,
+                    "saveToSentItems": save_to_sent_items,
+                },
+            )
+            logger.info("Correo enviado desde %s a %s", self._sender, to)
+        except RequestError as exc:
+            raise MailError(
+                f"Error al enviar correo desde {self._sender}: {exc}"
+            ) from exc
+
+    def _armar_mensaje(
+        self,
+        to: str | list[str],
+        subject: str,
+        body: str,
+        *,
+        cc: str | list[str] | None = None,
+        bcc: str | list[str] | None = None,
+        reply_to: str | list[str] | None = None,
+        attachments: list[Any] | None = None,
+        is_html: bool = True,
+    ) -> dict[str, Any]:
+
         message: dict[str, Any] = {
             "subject": subject,
             "body": {
@@ -58,19 +145,7 @@ class Mail:
                 self._construir_adjunto(item) for item in attachments
             ]
 
-        try:
-            self._client.crear(
-                f"/users/{self._sender}/sendMail",
-                json={
-                    "message": message,
-                    "saveToSentItems": save_to_sent_items,
-                },
-            )
-            logger.info("Correo enviado desde %s a %s", self._sender, to)
-        except RequestError as exc:
-            raise MailError(
-                f"Error al enviar correo desde {self._sender}: {exc}"
-            ) from exc
+        return message
 
     @staticmethod
     def _a_destinatarios(value: str | list[str]) -> list[dict[str, Any]]:

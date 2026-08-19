@@ -15,4 +15,8 @@ class SharePointError(GraphError):
 
 
 class MailError(GraphError):
-    """Error relacionado con Outlook."""
+    """Error relacionado con el envío en Outlook."""
+
+
+class MailboxError(GraphError):
+    """Error relacionado con las carpetas de Outlook."""
