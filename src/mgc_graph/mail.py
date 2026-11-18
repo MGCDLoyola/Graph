@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from .client import GraphClient
+from .constants import UPLOAD_CHUNK_SIZE
 from .exceptions import MailError, RequestError
 
 logger = logging.getLogger(__name__)
 
-# Límite de Graph para fileAttachment en sendMail (por archivo)
 MAX_ATTACHMENT_SIZE = 3 * 1024 * 1024
+MAX_UPLOAD_SIZE = 150 * 1024 * 1024
 
 
 class Mail:
@@ -37,9 +38,13 @@ class Mail:
         is_html: bool = True,
     ) -> str:
 
+        adjuntos = self._leer_adjuntos(attachments)
+        chicos = [a for a in adjuntos if len(a[1]) <= MAX_ATTACHMENT_SIZE]
+        grandes = [a for a in adjuntos if len(a[1]) > MAX_ATTACHMENT_SIZE]
+
         message = self._armar_mensaje(
             to, subject, body,
-            cc=cc, bcc=bcc, reply_to=reply_to, attachments=attachments, is_html=is_html
+            cc=cc, bcc=bcc, reply_to=reply_to, attachments=chicos, is_html=is_html
         )
 
         try:
@@ -52,7 +57,20 @@ class Mail:
                 f"Error al crear borrador desde {self._sender}: {exc}"
             ) from exc
 
-        return respuesta["id"]
+        message_id = respuesta["id"]
+
+        try:
+            for nombre, contenido in grandes:
+                self._subir_adjunto(message_id, nombre, contenido)
+        except Exception as exc:
+            self._descartar_borrador(message_id)
+            if isinstance(exc, MailError):
+                raise
+            raise MailError(
+                f"Error al subir adjunto grande desde {self._sender}: {exc}"
+            ) from exc
+
+        return message_id
 
     def enviar(
         self,
@@ -75,16 +93,7 @@ class Mail:
                     "enviar() recibe o 'message_id', o 'to'/'subject'/'body' — no ambos."
                 )
 
-            try:
-                self._client.crear(
-                    f"/users/{self._sender}/messages/{message_id}/send"
-                )
-                logger.info("Correo despachado desde %s (id=%s)", self._sender, message_id)
-            except RequestError as exc:
-                raise MailError(
-                    f"Error al enviar el borrador {message_id} desde {self._sender}: {exc}"
-                ) from exc
-
+            self._despachar_borrador(message_id)
             return
 
         if to is None or subject is None or body is None:
@@ -92,9 +101,19 @@ class Mail:
                 "enviar() requiere 'to', 'subject' y 'body' cuando no se pasa 'message_id'."
             )
 
+        adjuntos = self._leer_adjuntos(attachments)
+
+        if any(len(contenido) > MAX_ATTACHMENT_SIZE for _, contenido in adjuntos):
+            borrador = self.crear(
+                to, subject, body,
+                cc=cc, bcc=bcc, reply_to=reply_to, attachments=adjuntos, is_html=is_html
+            )
+            self._despachar_borrador(borrador)
+            return
+
         message = self._armar_mensaje(
             to, subject, body,
-            cc=cc, bcc=bcc, reply_to=reply_to, attachments=attachments, is_html=is_html
+            cc=cc, bcc=bcc, reply_to=reply_to, attachments=adjuntos, is_html=is_html
         )
 
         try:
@@ -111,6 +130,84 @@ class Mail:
                 f"Error al enviar correo desde {self._sender}: {exc}"
             ) from exc
 
+    def _despachar_borrador(self, message_id: str) -> None:
+        try:
+            self._client.crear(
+                f"/users/{self._sender}/messages/{message_id}/send"
+            )
+            logger.info("Correo despachado desde %s (id=%s)", self._sender, message_id)
+        except RequestError as exc:
+            raise MailError(
+                f"Error al enviar el borrador {message_id} desde {self._sender}: {exc}"
+            ) from exc
+
+    def _descartar_borrador(self, message_id: str) -> None:
+        try:
+            self._client.eliminar(f"/users/{self._sender}/messages/{message_id}")
+        except Exception:
+            logger.warning("No se pudo eliminar el borrador %s", message_id)
+
+    def _subir_adjunto(self, message_id: str, nombre: str, contenido: bytes) -> None:
+        total = len(contenido)
+
+        if total > MAX_UPLOAD_SIZE:
+            raise MailError(
+                f"El adjunto '{nombre}' ({total} bytes) excede el límite "
+                f"de {MAX_UPLOAD_SIZE} bytes de Graph."
+            )
+
+        content_type = mimetypes.guess_type(nombre)[0] or "application/octet-stream"
+
+        try:
+            sesion = self._client.crear(
+                f"/users/{self._sender}/messages/{message_id}"
+                f"/attachments/createUploadSession",
+                json={
+                    "AttachmentItem": {
+                        "attachmentType": "file",
+                        "name": nombre,
+                        "size": total,
+                        "contentType": content_type,
+                    }
+                },
+            )
+
+            url = sesion["uploadUrl"]
+
+            for inicio in range(0, total, UPLOAD_CHUNK_SIZE):
+                fin = min(inicio + UPLOAD_CHUNK_SIZE, total) - 1
+                self._client.subir_fragmento(
+                    url, contenido[inicio:fin + 1], inicio, fin, total
+                )
+        except RequestError as exc:
+            raise MailError(
+                f"Error al subir el adjunto '{nombre}' desde {self._sender}: {exc}"
+            ) from exc
+
+        logger.info("Adjunto grande subido: %s (%d bytes)", nombre, total)
+
+    @staticmethod
+    def _leer_adjuntos(attachments: list[Any] | None) -> list[tuple[str, bytes]]:
+        resultado: list[tuple[str, bytes]] = []
+
+        for item in attachments or []:
+            if isinstance(item, tuple):
+                name, content = item
+                if not isinstance(content, (bytes, bytearray)):
+                    raise MailError(
+                        f"El adjunto en memoria '{name}' debe ser bytes."
+                    )
+            else:
+                path = Path(item)
+                if not path.is_file():
+                    raise MailError(f"No se encontró el archivo: {path}")
+                name = path.name
+                content = path.read_bytes()
+
+            resultado.append((name, bytes(content)))
+
+        return resultado
+
     def _armar_mensaje(
         self,
         to: str | list[str],
@@ -120,7 +217,7 @@ class Mail:
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
         reply_to: str | list[str] | None = None,
-        attachments: list[Any] | None = None,
+        attachments: list[tuple[str, bytes]] | None = None,
         is_html: bool = True,
     ) -> dict[str, Any]:
 
@@ -142,7 +239,7 @@ class Mail:
 
         if attachments:
             message["attachments"] = [
-                self._construir_adjunto(item) for item in attachments
+                self._construir_adjunto(name, content) for name, content in attachments
             ]
 
         return message
@@ -157,27 +254,7 @@ class Mail:
         ]
 
     @staticmethod
-    def _construir_adjunto(item: Any) -> dict[str, Any]:
-        if isinstance(item, tuple):
-            name, content = item
-            if not isinstance(content, (bytes, bytearray)):
-                raise MailError(
-                    f"El adjunto en memoria '{name}' debe ser bytes."
-                )
-        else:
-            path = Path(item)
-            if not path.is_file():
-                raise MailError(f"No se encontró el archivo: {path}")
-            name = path.name
-            content = path.read_bytes()
-
-        if len(content) > MAX_ATTACHMENT_SIZE:
-            raise MailError(
-                f"El adjunto '{name}' ({len(content)} bytes) excede el límite "
-                f"de {MAX_ATTACHMENT_SIZE} bytes. Para archivos grandes usa "
-                f"uploadSession en lugar de sendMail."
-            )
-
+    def _construir_adjunto(name: str, content: bytes) -> dict[str, Any]:
         content_type = (
             mimetypes.guess_type(name)[0] or "application/octet-stream"
         )

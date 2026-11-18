@@ -9,7 +9,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .auth import GraphAuth
-from .constants import DEFAULT_TIMEOUT, GRAPH_URL
+from .constants import DEFAULT_TIMEOUT, GRAPH_URL, UPLOAD_TIMEOUT
 from .exceptions import RequestError
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,41 @@ class GraphClient:
         json: Any = None,
     ) -> dict[str, Any]:
         return self._request("PUT", endpoint, json=json)
+
+    def subir_fragmento(
+        self,
+        url: str,
+        datos: bytes,
+        inicio: int,
+        fin: int,
+        total: int,
+    ) -> dict[str, Any]:
+        logger.debug("SUBIDA %s bytes %d-%d/%d", url, inicio, fin, total)
+
+        response = self._auth.sesion.request(
+            method="PUT",
+            url=url,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Range": f"bytes {inicio}-{fin}/{total}",
+            },
+            data=datos,
+            timeout=UPLOAD_TIMEOUT,
+            verify=self._auth.sesion.verify,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise RequestError(
+                f"PUT fragmento {inicio}-{fin}/{total}\n"
+                f"{response.status_code}: {response.text}"
+            ) from exc
+
+        if not response.content:
+            return {}
+
+        return response.json()
 
     def eliminar(self, endpoint: str) -> None:
         self._request("DELETE", endpoint)
